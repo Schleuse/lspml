@@ -3,8 +3,8 @@ use std::fmt::{Display, Formatter};
 use lsp_types::{
     CodeActionKind, CodeActionOptions, CodeActionProviderCapability, CompletionOptions,
     CompletionOptionsCompletionItem, DiagnosticOptions, DiagnosticServerCapabilities, HoverOptions,
-    HoverProviderCapability, NumberOrString, OneOf, SemanticTokenModifier, SemanticTokenType,
-    SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+    HoverProviderCapability, NumberOrString, OneOf, PositionEncodingKind, SemanticTokenModifier,
+    SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
     SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
     TextDocumentSyncKind, WorkDoneProgressOptions,
 };
@@ -96,6 +96,12 @@ pub fn create() -> ServerCapabilities {
     return ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        // Every position this server emits counts bytes, so a client that
+        // measures in utf-16 code units misplaces anything behind a multi byte
+        // character. Declaring utf-8 says which unit we mean; negotiating it
+        // against what the client supports, and converting where it does not,
+        // is #9.
+        position_encoding: Some(PositionEncodingKind::UTF8),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             SemanticTokensOptions {
                 full: Some(SemanticTokensFullOptions::Bool(true)),
@@ -137,11 +143,18 @@ pub fn create() -> ServerCapabilities {
 
 #[cfg(test)]
 mod tests {
+    use lsp_types::PositionEncodingKind;
+
     use super::create;
 
     #[test]
     fn test_document_highlight_is_not_advertised() {
         assert_eq!(create().document_highlight_provider, None);
+    }
+
+    #[test]
+    fn test_positions_are_declared_to_be_encoded_in_utf8() {
+        assert_eq!(create().position_encoding, Some(PositionEncodingKind::UTF8));
     }
 
     #[test]
