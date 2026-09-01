@@ -117,7 +117,6 @@ fn main_loop(
                     "textDocument/completion" => command::complete,
                     "textDocument/definition" => command::definition,
                     "textDocument/diagnostic" => command::diagnostic,
-                    "textDocument/documentHighlight" => command::highlight, // stub
                     "textDocument/semanticTokens/full" => command::semantics,
                     "textDocument/codeAction" => command::action,
                     "textDocument/hover" => command::hover,

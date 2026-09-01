@@ -8,7 +8,6 @@ use std::fmt;
 mod action;
 mod complete;
 mod definition;
-mod highlight;
 mod hover;
 mod semantics;
 
@@ -103,22 +102,6 @@ pub(crate) fn diagnostic(request: Request) -> Result<Message> {
                     error: None,
                 },
                 Err(err) => LsError::from(err).to_response(request.id),
-            })
-        })
-        .map_err(Error::from);
-}
-
-pub(crate) fn highlight(request: Request) -> Result<Message> {
-    log::trace!("got highlight request: {request:?}");
-    return serde_json::from_value(request.params)
-        .map(|params| {
-            Message::Response(match highlight::highlight(params) {
-                Ok(highlights) => Response {
-                    id: request.id,
-                    result: serde_json::to_value(highlights).ok(),
-                    error: None,
-                },
-                Err(err) => err.to_response(request.id),
             })
         })
         .map_err(Error::from);

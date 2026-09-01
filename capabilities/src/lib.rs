@@ -96,7 +96,6 @@ pub fn create() -> ServerCapabilities {
     return ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
-        document_highlight_provider: Some(OneOf::Left(true)),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             SemanticTokensOptions {
                 full: Some(SemanticTokensFullOptions::Bool(true)),
@@ -139,6 +138,11 @@ pub fn create() -> ServerCapabilities {
 #[cfg(test)]
 mod tests {
     use super::create;
+
+    #[test]
+    fn test_document_highlight_is_not_advertised() {
+        assert_eq!(create().document_highlight_provider, None);
+    }
 
     #[test]
     fn test_completion_triggers_on_the_characters_that_begin_a_construct() {
