@@ -9,6 +9,14 @@ use lsp_types::{
     TextDocumentSyncKind, WorkDoneProgressOptions,
 };
 
+/// Characters that begin a completable construct, which clients use to fire
+/// completion as the developer types: a tag ("<") and the separator between its
+/// namespace and its name (":"), an attribute value ("\""), an expression
+/// variable ("$"), a member of an object (".") and a path segment of a uri
+/// ("/"). A space is deliberately not among them - it would fire inside prose,
+/// where nothing is completable.
+pub const COMPLETION_TRIGGER_CHARACTERS: &'static [&'static str] = &["<", ":", "\"", "$", ".", "/"];
+
 pub const TOKEN_TYPES: &'static [SemanticTokenType] = &[
     SemanticTokenType::ENUM,
     SemanticTokenType::ENUM_MEMBER,
@@ -107,6 +115,12 @@ pub fn create() -> ServerCapabilities {
             completion_item: Some(CompletionOptionsCompletionItem {
                 label_details_support: Some(true),
             }),
+            trigger_characters: Some(
+                COMPLETION_TRIGGER_CHARACTERS
+                    .iter()
+                    .map(|character| character.to_string())
+                    .collect(),
+            ),
             ..CompletionOptions::default()
         }),
         hover_provider: Some(HoverProviderCapability::Options(HoverOptions {
@@ -120,4 +134,24 @@ pub fn create() -> ServerCapabilities {
         })),
         ..ServerCapabilities::default()
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create;
+
+    #[test]
+    fn test_completion_triggers_on_the_characters_that_begin_a_construct() {
+        assert_eq!(
+            create()
+                .completion_provider
+                .and_then(|provider| provider.trigger_characters),
+            Some(
+                ["<", ":", "\"", "$", ".", "/"]
+                    .iter()
+                    .map(|character| character.to_string())
+                    .collect::<Vec<String>>()
+            )
+        );
+    }
 }
