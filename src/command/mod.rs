@@ -130,9 +130,13 @@ pub(crate) fn hover(request: Request) -> Result<Message> {
             result: Some(serde_json::to_value(result)?),
             error: None,
         },
+        // `Response::result` is skipped when serializing if it is `None`, which
+        // would put a response on the wire that has neither a result nor an
+        // error. Clients reject that, so "no hover here" has to be an explicit
+        // json null.
         Ok(None) => Response {
             id: request.id,
-            result: None,
+            result: Some(serde_json::value::Value::Null),
             error: None,
         },
         Err(err) => err.to_response(request.id),
