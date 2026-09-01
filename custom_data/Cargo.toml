@@ -1,0 +1,12 @@
+[package]
+name = "custom_data"
+version = "0.0.2"
+edition = "2024"
+repository = "https://github.com/DrWursterich/lspml/custom_data"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.79"
+grammar = { path = "../grammar" }
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0.140"

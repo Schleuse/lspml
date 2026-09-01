@@ -18,6 +18,18 @@ impl PartialEq for TagDefinition {
     }
 }
 
+impl TagDefinition {
+    /// Whether the tag may enclose anything between its opening and closing tag.
+    ///
+    /// Child tags are only one way to have a body. A handful of tags accept no
+    /// child tags at all and still take their value from body text, which the
+    /// `...OrBody` attribute rules express.
+    pub fn permits_body(&self) -> bool {
+        return !matches!(self.children, TagChildren::None)
+            || self.attribute_rules.iter().any(AttributeRule::permits_body);
+    }
+}
+
 #[derive(Debug)]
 pub enum TagAttributes {
     None,
@@ -90,6 +102,77 @@ pub enum AttributeRule {
     // Expression(&'static str),
     // Condition(&'static str),
     // TODO: Renamed?
+}
+
+impl AttributeRule {
+    /// Whether the rule offers a tag body as an alternative to an attribute.
+    ///
+    /// Matched exhaustively on purpose: a new rule has to state whether it
+    /// admits a body, rather than defaulting to "no" and silently turning a
+    /// tag into a void one.
+    pub fn permits_body(&self) -> bool {
+        return match self {
+            AttributeRule::BodyOnlyWithEitherValue(..)
+            | AttributeRule::ExactlyOneOfOrBody(..)
+            | AttributeRule::ExactlyOneOfOrBodyWithEitherValue(..)
+            | AttributeRule::ExactlyOneOfOrBodyWithValue(..)
+            | AttributeRule::ExactlyOrBody(..)
+            | AttributeRule::OnlyOneOfOrBody(..)
+            | AttributeRule::OnlyOrBody(..)
+            | AttributeRule::OnlyWithEitherOrBody(..)
+            | AttributeRule::RequiredOrBodyWithValue(..) => true,
+            AttributeRule::AtleastOneOf(..)
+            | AttributeRule::Deprecated(..)
+            | AttributeRule::ExactlyOneOf(..)
+            | AttributeRule::OnlyOneOf(..)
+            | AttributeRule::OnlyWith(..)
+            | AttributeRule::OnlyWithEither(..)
+            | AttributeRule::OnlyWithEitherValue(..)
+            | AttributeRule::OnlyWithValue(..)
+            | AttributeRule::Required(..)
+            | AttributeRule::RequiredWithEitherValue(..)
+            | AttributeRule::RequiredWithValue(..)
+            | AttributeRule::UriExists(..)
+            | AttributeRule::ValueOneOf(..)
+            | AttributeRule::ValueOneOfCaseInsensitive(..) => false,
+        };
+    }
+
+    /// The complete set of values an attribute is restricted to, if the rule
+    /// states one, along with the attribute it restricts.
+    ///
+    /// Rules that name a single value of another attribute as a condition do
+    /// not qualify: they say nothing about the other values that attribute may
+    /// take, so treating them as a domain would reject valid markup.
+    ///
+    /// Matched exhaustively for the same reason as [`AttributeRule::permits_body`].
+    pub fn value_domain(&self) -> Option<(&'static str, &'static [&'static str])> {
+        return match self {
+            AttributeRule::ValueOneOf(name, values)
+            | AttributeRule::ValueOneOfCaseInsensitive(name, values) => Some((name, values)),
+            AttributeRule::AtleastOneOf(..)
+            | AttributeRule::BodyOnlyWithEitherValue(..)
+            | AttributeRule::Deprecated(..)
+            | AttributeRule::ExactlyOneOf(..)
+            | AttributeRule::ExactlyOneOfOrBody(..)
+            | AttributeRule::ExactlyOneOfOrBodyWithEitherValue(..)
+            | AttributeRule::ExactlyOneOfOrBodyWithValue(..)
+            | AttributeRule::ExactlyOrBody(..)
+            | AttributeRule::OnlyOneOf(..)
+            | AttributeRule::OnlyOneOfOrBody(..)
+            | AttributeRule::OnlyOrBody(..)
+            | AttributeRule::OnlyWith(..)
+            | AttributeRule::OnlyWithEither(..)
+            | AttributeRule::OnlyWithEitherOrBody(..)
+            | AttributeRule::OnlyWithEitherValue(..)
+            | AttributeRule::OnlyWithValue(..)
+            | AttributeRule::Required(..)
+            | AttributeRule::RequiredOrBodyWithValue(..)
+            | AttributeRule::RequiredWithEitherValue(..)
+            | AttributeRule::RequiredWithValue(..)
+            | AttributeRule::UriExists(..) => None,
+        };
+    }
 }
 
 #[derive(Debug)]
@@ -1922,7 +2005,32 @@ impl TagDefinition {
     );
 }
 
-pub const TOP_LEVEL_TAGS: [TagDefinition; 79] = [
+/// Every tag a document can contain: the top level ones, plus the ones that
+/// may only appear inside another tag.
+///
+/// Walked rather than listed, so that registering a tag in [`TOP_LEVEL_TAGS`]
+/// or in another tag's children is the only place it has to be named.
+pub fn all_tags() -> Vec<&'static TagDefinition> {
+    let mut tags = Vec::new();
+    let mut pending = TOP_LEVEL_TAGS
+        .iter()
+        .collect::<Vec<&'static TagDefinition>>();
+    while let Some(tag) = pending.pop() {
+        if tags.contains(&tag) {
+            continue;
+        }
+        tags.push(tag);
+        match tag.children {
+            // `Any` means any top level tag, which the walk already started from.
+            TagChildren::Any | TagChildren::None => (),
+            TagChildren::Scalar(child) => pending.push(child),
+            TagChildren::Vector(children) => pending.extend(children.iter()),
+        }
+    }
+    return tags;
+}
+
+pub static TOP_LEVEL_TAGS: [TagDefinition; 79] = [
     TagDefinition::SP_ATTRIBUTE,
     TagDefinition::SP_BARCODE,
     TagDefinition::SP_BREAK,
@@ -2093,5 +2201,118 @@ impl FromStr for TagDefinition {
             "spt_worklist_tag" => Ok(TagDefinition::SPT_WORKLIST),
             tag => Err(anyhow::anyhow!("not a valid tag: \"{}\"", tag)),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AttributeRule, TOP_LEVEL_TAGS, TagAttributes, TagChildren, TagDefinition, all_tags,
+    };
+
+    /// Two tags carry value domains for attributes they never declare, so the
+    /// domains are unreachable: sp:option restricts five attributes missing
+    /// from its attribute list, and spt:imp declares `text-transform` while
+    /// its rules name `text_transform`. Both predate this test and want a
+    /// grammar fix rather than a workaround in the readers of these rules.
+    const TAGS_WITH_UNREACHABLE_VALUE_DOMAINS: [&str; 2] = ["sp:option", "spt:imp"];
+
+    #[test]
+    fn test_all_tags_contains_the_top_level_tags() {
+        for tag in &TOP_LEVEL_TAGS {
+            assert!(all_tags().contains(&tag), "{} is missing", tag.name);
+        }
+    }
+
+    #[test]
+    fn test_all_tags_reaches_tags_that_are_only_another_tags_child() {
+        let names = all_tags().iter().map(|tag| tag.name).collect::<Vec<&str>>();
+        // sp:argument only appears inside sp:include, the sp:if branches only
+        // inside sp:if, so none of them is a top level tag.
+        for name in ["sp:argument", "sp:else", "sp:elseif"] {
+            assert!(names.contains(&name), "{} is missing", name);
+        }
+    }
+
+    #[test]
+    fn test_all_tags_lists_no_tag_twice() {
+        let mut names = all_tags().iter().map(|tag| tag.name).collect::<Vec<&str>>();
+        let count = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), count);
+    }
+
+    #[test]
+    fn test_tags_that_accept_children_permit_a_body() {
+        for tag in all_tags() {
+            if !matches!(tag.children, TagChildren::None) {
+                assert!(tag.permits_body(), "{} accepts children", tag.name);
+            }
+        }
+    }
+
+    /// sp:return takes no child tags, but `<sp:return>value</sp:return>` is how
+    /// its value is written when it is not an attribute.
+    #[test]
+    fn test_a_tag_without_children_permits_a_body_when_a_rule_offers_one() {
+        assert!(matches!(
+            TagDefinition::SP_RETURN.children,
+            TagChildren::None
+        ));
+        assert!(TagDefinition::SP_RETURN.permits_body());
+    }
+
+    #[test]
+    fn test_a_tag_without_children_and_without_an_or_body_rule_permits_no_body() {
+        assert!(!TagDefinition::SP_BREAK.permits_body());
+    }
+
+    #[test]
+    fn test_one_of_rules_state_a_value_domain() {
+        assert_eq!(
+            AttributeRule::ValueOneOf("scope", &["page", "request"]).value_domain(),
+            Some(("scope", &["page", "request"][..]))
+        );
+        assert_eq!(
+            AttributeRule::ValueOneOfCaseInsensitive("mode", &["read"]).value_domain(),
+            Some(("mode", &["read"][..]))
+        );
+    }
+
+    /// A conditional rule mentions one value of another attribute. That single
+    /// value is not the domain of that attribute.
+    #[test]
+    fn test_conditional_rules_state_no_value_domain() {
+        assert_eq!(
+            AttributeRule::RequiredWithValue("object", "action", "putAll").value_domain(),
+            None
+        );
+        assert_eq!(
+            AttributeRule::OnlyWithValue("default", "action", "insert").value_domain(),
+            None
+        );
+    }
+
+    #[test]
+    fn test_value_domains_name_an_attribute_the_tag_declares() {
+        for tag in all_tags() {
+            if TAGS_WITH_UNREACHABLE_VALUE_DOMAINS.contains(&tag.name) {
+                continue;
+            }
+            for (attribute, _) in tag
+                .attribute_rules
+                .iter()
+                .filter_map(AttributeRule::value_domain)
+            {
+                assert!(
+                    matches!(tag.attributes, TagAttributes::These(_))
+                        && tag.attributes.get_by_name(attribute).is_some(),
+                    "{} restricts the values of {}, which it does not declare",
+                    tag.name,
+                    attribute
+                );
+            }
+        }
     }
 }

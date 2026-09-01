@@ -1,5 +1,5 @@
 [workspace]
-default-members = [ "capabilities", "derive", "diagnostic", "document_store", "grammar", "modules", "parser", "spel" ]
+default-members = [ "capabilities", "custom_data", "derive", "diagnostic", "document_store", "grammar", "modules", "parser", "spel" ]
 
 [package]
 name = "lspml"
@@ -13,6 +13,7 @@ anyhow = "1.0.79"
 capabilities = { path = "./capabilities" }
 clap = { version = "4.4.18", features = ["derive", "env", "wrap_help"] }
 colored = "3.0.0"
+custom_data = { path = "./custom_data" }
 diagnostic = { path = "./diagnostic" }
 document_store = { path = "./document_store" }
 grammar = { path = "./grammar" }

@@ -241,27 +241,23 @@ impl CompletionCollector<'_> {
                         });
                     }
                     SpelAst::String(_) => {
-                        for rule in tag.definition().attribute_rules {
-                            let name = name.strip_suffix("_attribute").unwrap_or(name);
-                            match rule {
-                                AttributeRule::ValueOneOf(attribute_name, values)
-                                | AttributeRule::ValueOneOfCaseInsensitive(
-                                    attribute_name,
-                                    values,
-                                ) if attribute_name == &name => {
-                                    values.iter().for_each(|value| {
-                                        self.completions.push(CompletionItem {
-                                            label: value.to_string(),
-                                            kind: Some(CompletionItemKind::ENUM_MEMBER),
-                                            detail: None,
-                                            documentation: None,
-                                            ..Default::default()
-                                        })
-                                    });
-                                    break;
-                                }
-                                _ => (),
-                            };
+                        let name = name.strip_suffix("_attribute").unwrap_or(name);
+                        for (_, values) in tag
+                            .definition()
+                            .attribute_rules
+                            .iter()
+                            .filter_map(AttributeRule::value_domain)
+                            .filter(|(attribute_name, _)| attribute_name == &name)
+                        {
+                            values.iter().for_each(|value| {
+                                self.completions.push(CompletionItem {
+                                    label: value.to_string(),
+                                    kind: Some(CompletionItemKind::ENUM_MEMBER),
+                                    detail: None,
+                                    documentation: None,
+                                    ..Default::default()
+                                })
+                            });
                         }
                     }
                     SpelAst::Uri(SpelResult::Valid(uri)) => {

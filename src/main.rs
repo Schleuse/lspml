@@ -14,6 +14,9 @@ mod command;
 #[derive(Parser, Debug)]
 #[clap(name = "lspml")]
 struct CommandLineOpts {
+    /// Without one the language server is started on stdio
+    #[clap(subcommand)]
+    command: Option<Command>,
     #[clap(long)]
     log_file: Option<String>,
     #[clap(long, default_value = "INFO")]
@@ -22,8 +25,29 @@ struct CommandLineOpts {
     modules_file: Option<String>,
 }
 
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Print an artifact generated from the tag grammar to stdout
+    Dump {
+        #[clap(value_enum)]
+        artifact: Artifact,
+    },
+}
+
+#[derive(Clone, Debug, clap::ValueEnum)]
+enum Artifact {
+    /// Custom data for vscode's html language server
+    HtmlCustomData,
+}
+
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let opts = CommandLineOpts::parse();
+
+    // Dumping is a one shot write to stdout, which the language server owns for
+    // the rest of this function.
+    if let Some(Command::Dump { artifact }) = &opts.command {
+        return dump(artifact);
+    }
 
     Builder::with_level(&opts.log_level)
         .with_target_writer(
@@ -64,6 +88,16 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     io_threads.join()?;
 
     log::info!("shutting down lspml...");
+    return Ok(());
+}
+
+fn dump(artifact: &Artifact) -> Result<(), Box<dyn Error + Sync + Send>> {
+    print!(
+        "{}",
+        match artifact {
+            Artifact::HtmlCustomData => custom_data::html_custom_data()?,
+        }
+    );
     return Ok(());
 }
 
