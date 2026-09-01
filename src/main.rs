@@ -157,37 +157,40 @@ fn main_loop(
 }
 
 fn changed(params: DidChangeTextDocumentParams) -> Result<()> {
-    let uri = params.text_document.uri;
-    return match &params.content_changes.last() {
-        Some(change) => document_store::Document::new(change.text.to_owned()).map(|document| {
-            document_store::put(&uri, document);
-            log::debug!("updated {:?}", uri);
-        }),
+    let DidChangeTextDocumentParams {
+        text_document,
+        mut content_changes,
+    } = params;
+    let uri = text_document.uri;
+    return match content_changes.pop() {
+        Some(change) => {
+            document_store::update(&uri, text_document.version, change.text).map(|_| {
+                log::debug!("updated {:?}", uri);
+            })
+        }
         None => Ok(()),
     };
 }
 
 fn opened(params: DidOpenTextDocumentParams) -> Result<()> {
-    let uri = params.text_document.uri;
-    return match document_store::get(&uri) {
-        Some(_) => Ok(()),
-        None => document_store::Document::new(params.text_document.text).map(|document| {
-            document_store::put(&uri, document);
-            log::debug!("opened {:?}", uri);
-            return ();
-        }),
-    };
+    let document = params.text_document;
+    let uri = document.uri;
+    return document_store::update(&uri, document.version, document.text).map(|_| {
+        log::debug!("opened {:?}", uri);
+    });
 }
 
 fn saved(params: DidSaveTextDocumentParams) -> Result<()> {
     let uri = params.text_document.uri;
-    return document_store::Document::from_uri(&uri).map(|document| {
-        document_store::put(&uri, document);
+    return document_store::save(&uri, params.text).map(|_| {
         log::debug!("saved {:?}", uri);
     });
 }
 
-fn closed(_: DidCloseTextDocumentParams) -> Result<()> {
-    // document_store::free(&uri); ?
+fn closed(params: DidCloseTextDocumentParams) -> Result<()> {
+    let uri = params.text_document.uri;
+    if document_store::close(&uri) {
+        log::debug!("closed {:?}", uri);
+    }
     return Ok(());
 }

@@ -489,17 +489,14 @@ impl CompletionCollector<'_> {
 pub(crate) fn complete(params: CompletionParams) -> Result<Vec<CompletionItem>, LsError> {
     let text_params = params.text_document_position;
     let uri = &text_params.text_document.uri;
-    let document = match document_store::get(uri) {
-        Some(document) => document,
-        None => match document_store::Document::from_uri(uri) {
-            Ok(document) => document_store::put(uri, document),
-            // completion fires on every trigger character the developer types,
-            // so a document we cannot read must not raise an error each time.
-            Err(err) => {
-                log::error!("failed to read {:?}: {}", uri, err);
-                return Ok(Vec::new());
-            }
-        },
+    let document = match document_store::get_or_load(uri) {
+        Ok(document) => document,
+        // completion fires on every trigger character the developer types, so a
+        // document we cannot read must not raise an error each time.
+        Err(err) => {
+            log::error!("failed to read {:?}: {}", uri, err);
+            return Ok(Vec::new());
+        }
     };
     let mut completion_collector = CompletionCollector::new(
         &text_params,
@@ -682,7 +679,7 @@ mod tests {
     fn completions_at(marked_text: &str, trigger: Trigger) -> Vec<String> {
         let _ = modules::init_empty_module_mappings();
         let (text, cursor) = split_cursor_marker(marked_text);
-        let document = document_store::Document::new(text).expect("failed to parse document");
+        let document = document_store::Document::new(text, None).expect("failed to parse document");
         let params = TextDocumentPositionParams {
             text_document: TextDocumentIdentifier {
                 uri: "file:///some/test/file.spml".parse::<Url>().unwrap(),

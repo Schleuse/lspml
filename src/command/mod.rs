@@ -2,9 +2,12 @@ use anyhow::{Error, Result};
 use lsp_server::{ErrorCode, Message, Request, RequestId, Response, ResponseError};
 use lsp_types::{
     CompletionResponse, DocumentDiagnosticReport, FullDocumentDiagnosticReport,
-    RelatedFullDocumentDiagnosticReport, SemanticTokens, SemanticTokensResult,
+    RelatedFullDocumentDiagnosticReport, SemanticTokens, SemanticTokensResult, Uri,
 };
-use std::fmt;
+use std::{fmt, sync::Arc};
+
+use document_store::Document;
+
 mod action;
 mod complete;
 mod definition;
@@ -46,6 +49,18 @@ impl LsError {
             }),
         };
     }
+}
+
+/// The document a request is about, or the error to answer the request with
+/// when the file behind it cannot be read.
+fn document(uri: &Uri) -> Result<Arc<Document>, LsError> {
+    return document_store::get_or_load(uri).map_err(|err| {
+        log::error!("failed to read {:?}: {}", uri, err);
+        return LsError {
+            message: format!("cannot read file {:?}", uri),
+            code: ErrorCode::RequestFailed,
+        };
+    });
 }
 
 pub(crate) fn complete(request: Request) -> Result<Message> {

@@ -1,7 +1,6 @@
 use std::cmp::Ordering;
 
 use anyhow::Result;
-use lsp_server::ErrorCode;
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensParams};
 
 use super::LsError;
@@ -158,18 +157,7 @@ impl SpelTokenCollector<'_> {
  */
 pub(crate) fn semantics(params: SemanticTokensParams) -> Result<Vec<SemanticToken>, LsError> {
     let uri = params.text_document.uri;
-    let document = match document_store::get(&uri) {
-        Some(document) => Ok(document),
-        None => document_store::Document::from_uri(&uri)
-            .map(|document| document_store::put(&uri, document))
-            .map_err(|err| {
-                log::error!("failed to read {:?}: {}", uri, err);
-                return LsError {
-                    message: format!("cannot read file {:?}", uri),
-                    code: ErrorCode::RequestFailed,
-                };
-            }),
-    }?;
+    let document = super::document(&uri)?;
     let tokenizer = &mut Tokenizer::new();
     index_document(&document.tree, tokenizer);
     return Ok(tokenizer.collect());

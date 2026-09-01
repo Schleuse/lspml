@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use lsp_server::ErrorCode;
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, Position, Range, TextEdit,
     Uri, WorkspaceEdit,
@@ -25,18 +24,7 @@ const DEFAULT_HEADER: &str = concat!(
 
 pub(crate) fn action(params: CodeActionParams) -> Result<Vec<CodeActionOrCommand>, LsError> {
     let uri = params.text_document.uri;
-    let document = match document_store::get(&uri) {
-        Some(document) => Ok(document),
-        None => document_store::Document::from_uri(&uri)
-            .map(|document| document_store::put(&uri, document))
-            .map_err(|err| {
-                log::error!("failed to read {:?}: {}", uri, err);
-                return LsError {
-                    message: format!("cannot read file {:?}", uri),
-                    code: ErrorCode::RequestFailed,
-                };
-            }),
-    }?;
+    let document = super::document(&uri)?;
     let mut actions = Vec::new();
     if params
         .context

@@ -1,6 +1,5 @@
 use std::{cmp::Ordering, str::FromStr};
 
-use lsp_server::ErrorCode;
 use lsp_types::{Hover, HoverContents, HoverParams, MarkupContent, MarkupKind, Position};
 
 use super::LsError;
@@ -20,18 +19,7 @@ use spel::{
 pub(crate) fn hover(params: HoverParams) -> Result<Option<Hover>, LsError> {
     let text_params = params.text_document_position_params;
     let file = &text_params.text_document.uri;
-    let document = match document_store::get(file) {
-        Some(document) => Ok(document),
-        None => document_store::Document::from_uri(file)
-            .map(|document| document_store::put(file, document))
-            .map_err(|err| {
-                log::error!("failed to read {:?}: {}", file, err);
-                return LsError {
-                    message: format!("cannot read file {:?}", file),
-                    code: ErrorCode::RequestFailed,
-                };
-            }),
-    }?;
+    let document = super::document(file)?;
     let cursor = text_params.position;
     return match document.tree.node_at(cursor) {
         Some(Node::Tag(ParsedTag::Valid(tag))) => hover_tag(tag, &cursor),

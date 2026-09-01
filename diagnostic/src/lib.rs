@@ -1367,12 +1367,8 @@ pub fn diagnose_all(
 }
 
 fn diagnose_uri(uri: Url) -> Result<Vec<Diagnostic>> {
-    let document = match document_store::get(&uri) {
-        Some(document) => Ok(document),
-        None => document_store::Document::from_uri(&uri)
-            .map(|document| document_store::put(&uri, document))
-            .map_err(|err| anyhow::anyhow!("cannot read file {}: {}", uri.path(), err)),
-    }?;
+    let document = document_store::get_or_load(&uri)
+        .map_err(|err| anyhow::anyhow!("cannot read file {}: {}", uri.path(), err))?;
     let mut collector = DiagnosticCollector::new(uri.clone());
     collector
         .validate_document(&document.tree)
