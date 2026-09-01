@@ -1,12 +1,12 @@
 use std::fmt::{Display, Formatter};
 
 use lsp_types::{
-    CodeActionKind, CodeActionOptions, CodeActionProviderCapability, CompletionOptions,
-    CompletionOptionsCompletionItem, DiagnosticOptions, DiagnosticServerCapabilities, HoverOptions,
-    HoverProviderCapability, NumberOrString, OneOf, PositionEncodingKind, SemanticTokenModifier,
-    SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
-    SemanticTokensServerCapabilities, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, WorkDoneProgressOptions,
+    ClientCapabilities, CodeActionKind, CodeActionOptions, CodeActionProviderCapability,
+    CompletionOptions, CompletionOptionsCompletionItem, DiagnosticOptions,
+    DiagnosticServerCapabilities, HoverOptions, HoverProviderCapability, NumberOrString, OneOf,
+    PositionEncodingKind, SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions,
+    SemanticTokensLegend, SemanticTokensOptions, SemanticTokensServerCapabilities,
+    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgressOptions,
 };
 
 /// Characters that begin a completable construct, which clients use to fire
@@ -92,16 +92,32 @@ impl Display for CodeActionImplementation {
     }
 }
 
-pub fn create() -> ServerCapabilities {
+/// Picks the encoding the positions on the wire are counted in.
+///
+/// Every position this server emits comes from a tree-sitter point, whose
+/// columns count bytes, so utf-8 is what we would like to answer. A client only
+/// has to understand utf-16 though, and rejects an encoding it never offered -
+/// vscode advertises utf-16 alone and refuses to connect to a server declaring
+/// anything else. Falling back to utf-16 leaves those clients misplacing
+/// positions behind a multi byte character, which is what converting the
+/// columns in #9 is for.
+pub fn negotiate_position_encoding(client: &ClientCapabilities) -> PositionEncodingKind {
+    return match &client.general {
+        Some(general) => match &general.position_encodings {
+            Some(encodings) if encodings.contains(&PositionEncodingKind::UTF8) => {
+                PositionEncodingKind::UTF8
+            }
+            _ => PositionEncodingKind::UTF16,
+        },
+        None => PositionEncodingKind::UTF16,
+    };
+}
+
+pub fn create(client: &ClientCapabilities) -> ServerCapabilities {
     return ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
-        // Every position this server emits counts bytes, so a client that
-        // measures in utf-16 code units misplaces anything behind a multi byte
-        // character. Declaring utf-8 says which unit we mean; negotiating it
-        // against what the client supports, and converting where it does not,
-        // is #9.
-        position_encoding: Some(PositionEncodingKind::UTF8),
+        position_encoding: Some(negotiate_position_encoding(client)),
         semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
             SemanticTokensOptions {
                 full: Some(SemanticTokensFullOptions::Bool(true)),
@@ -143,24 +159,75 @@ pub fn create() -> ServerCapabilities {
 
 #[cfg(test)]
 mod tests {
-    use lsp_types::PositionEncodingKind;
+    use lsp_types::{ClientCapabilities, GeneralClientCapabilities, PositionEncodingKind};
 
-    use super::create;
+    use super::{create, negotiate_position_encoding};
 
-    #[test]
-    fn test_document_highlight_is_not_advertised() {
-        assert_eq!(create().document_highlight_provider, None);
+    fn advertising(encodings: Option<Vec<PositionEncodingKind>>) -> ClientCapabilities {
+        return ClientCapabilities {
+            general: Some(GeneralClientCapabilities {
+                position_encodings: encodings,
+                ..GeneralClientCapabilities::default()
+            }),
+            ..ClientCapabilities::default()
+        };
     }
 
     #[test]
-    fn test_positions_are_declared_to_be_encoded_in_utf8() {
-        assert_eq!(create().position_encoding, Some(PositionEncodingKind::UTF8));
+    fn test_document_highlight_is_not_advertised() {
+        assert_eq!(
+            create(&ClientCapabilities::default()).document_highlight_provider,
+            None
+        );
+    }
+
+    #[test]
+    fn test_positions_are_declared_to_be_encoded_in_utf8_where_it_is_supported() {
+        let client = advertising(Some(vec![
+            PositionEncodingKind::UTF16,
+            PositionEncodingKind::UTF8,
+        ]));
+        assert_eq!(
+            negotiate_position_encoding(&client),
+            PositionEncodingKind::UTF8
+        );
+        assert_eq!(
+            create(&client).position_encoding,
+            Some(PositionEncodingKind::UTF8)
+        );
+    }
+
+    // Vscode advertises this exact list and rejects a server that answers with
+    // anything but utf-16, refusing to start the client at all.
+    #[test]
+    fn test_positions_fall_back_to_utf16_where_utf8_is_not_supported() {
+        let client = advertising(Some(vec![PositionEncodingKind::UTF16]));
+        assert_eq!(
+            negotiate_position_encoding(&client),
+            PositionEncodingKind::UTF16
+        );
+        assert_eq!(
+            create(&client).position_encoding,
+            Some(PositionEncodingKind::UTF16)
+        );
+    }
+
+    #[test]
+    fn test_positions_fall_back_to_utf16_for_a_client_that_advertises_no_encoding() {
+        assert_eq!(
+            negotiate_position_encoding(&advertising(None)),
+            PositionEncodingKind::UTF16
+        );
+        assert_eq!(
+            negotiate_position_encoding(&ClientCapabilities::default()),
+            PositionEncodingKind::UTF16
+        );
     }
 
     #[test]
     fn test_completion_triggers_on_the_characters_that_begin_a_construct() {
         assert_eq!(
-            create()
+            create(&ClientCapabilities::default())
                 .completion_provider
                 .and_then(|provider| provider.trigger_characters),
             Some(

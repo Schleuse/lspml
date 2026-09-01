@@ -2,7 +2,7 @@ use std::{error::Error, fs};
 
 use anyhow::Result;
 use clap::Parser;
-use lsp_server::{Connection, Message};
+use lsp_server::{Connection, Message, ProtocolError};
 use lsp_types::{
     CancelParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams,
@@ -73,11 +73,15 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     }?;
 
     let (connection, io_threads) = Connection::stdio();
-    let server_capabilities = serde_json::to_value(capabilities::create())?;
-    let initialization_params = match connection.initialize(server_capabilities) {
-        Ok(params) => serde_json::from_value(params)?,
+    // Split instead of `Connection::initialize`: the capabilities we answer
+    // with depend on the ones the client sent, which that convenience method
+    // only hands back once the answer is already on the wire.
+    let initialization_params = match initialize(&connection) {
+        Ok(params) => params,
         Err(err) => {
-            if err.channel_is_disconnected() {
+            if let Some(err) = err.downcast_ref::<ProtocolError>()
+                && err.channel_is_disconnected()
+            {
                 io_threads.join()?;
             }
             return Err(err.into());
@@ -99,6 +103,14 @@ fn dump(artifact: &Artifact) -> Result<(), Box<dyn Error + Sync + Send>> {
         }
     );
     return Ok(());
+}
+
+fn initialize(connection: &Connection) -> Result<InitializeParams> {
+    let (id, params) = connection.initialize_start()?;
+    let params: InitializeParams = serde_json::from_value(params)?;
+    let capabilities = serde_json::to_value(capabilities::create(&params.capabilities))?;
+    connection.initialize_finish(id, serde_json::json!({ "capabilities": capabilities }))?;
+    return Ok(params);
 }
 
 fn main_loop(
