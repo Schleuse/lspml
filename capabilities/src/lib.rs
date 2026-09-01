@@ -98,9 +98,8 @@ impl Display for CodeActionImplementation {
 /// columns count bytes, so utf-8 is what we would like to answer. A client only
 /// has to understand utf-16 though, and rejects an encoding it never offered -
 /// vscode advertises utf-16 alone and refuses to connect to a server declaring
-/// anything else. Falling back to utf-16 leaves those clients misplacing
-/// positions behind a multi byte character, which is what converting the
-/// columns in #9 is for.
+/// anything else. What this returns is therefore what the lsp boundary counts
+/// every column in, converting them where the answer is utf-16.
 pub fn negotiate_position_encoding(client: &ClientCapabilities) -> PositionEncodingKind {
     return match &client.general {
         Some(general) => match &general.position_encodings {

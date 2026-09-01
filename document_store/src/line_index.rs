@@ -122,6 +122,44 @@ impl LineIndex {
         return Some((line.start + byte + (target - code_unit)).min(end));
     }
 
+    /// The same position with its character component recounted from the bytes
+    /// tree-sitter reports into utf-16 code units. A position naming a line the
+    /// text does not have is returned unchanged, there being nothing to count
+    /// it against; one whose column runs past the end of its line is clamped to
+    /// it.
+    pub fn utf16_columns(&self, position: Position) -> Position {
+        let Some(line) = self.lines.get(position.line as usize) else {
+            return position;
+        };
+        let offset =
+            (line.start + position.character as usize).min(self.line_end(position.line as usize));
+        return Position {
+            line: position.line,
+            character: self.utf16_position(offset).character,
+        };
+    }
+
+    /// The same position with its character component recounted from the utf-16
+    /// code units the client sends into bytes. A position naming a line the
+    /// text does not have is returned unchanged; the clamping of
+    /// [`LineIndex::byte_offset`] applies to every other one.
+    pub fn byte_columns(&self, position: Position) -> Position {
+        let Some(start) = self
+            .lines
+            .get(position.line as usize)
+            .map(|line| line.start)
+        else {
+            return position;
+        };
+        return match self.byte_offset(position) {
+            Some(offset) => Position {
+                line: position.line,
+                character: (offset - start) as u32,
+            },
+            None => position,
+        };
+    }
+
     /// The last byte offset the line can address. The next line's start belongs
     /// to that line, so a line that has a successor ends one byte before it -
     /// on its own terminating newline.
@@ -237,6 +275,56 @@ mod tests {
         assert_eq!(index.utf16_position(0), position(0, 0));
         assert_eq!(index.byte_offset(position(0, 0)), Some(0));
         assert_eq!(index.byte_offset(position(1, 0)), None);
+    }
+
+    #[test]
+    fn test_byte_columns_behind_an_umlaut_count_one_more_than_utf16_ones() {
+        // "Größe": the "ö" takes two bytes and one utf-16 code unit, so every
+        // column behind it differs by one between the two encodings.
+        let index = LineIndex::new("Größe\nx");
+
+        assert_eq!(index.utf16_columns(position(0, 2)), position(0, 2));
+        assert_eq!(index.utf16_columns(position(0, 4)), position(0, 3));
+        assert_eq!(index.utf16_columns(position(0, 6)), position(0, 4));
+        assert_eq!(index.byte_columns(position(0, 3)), position(0, 4));
+        assert_eq!(index.byte_columns(position(0, 4)), position(0, 6));
+    }
+
+    #[test]
+    fn test_columns_of_an_ascii_line_are_the_same_in_both_encodings() {
+        let index = LineIndex::new("abc\ndef");
+
+        assert_eq!(index.utf16_columns(position(1, 2)), position(1, 2));
+        assert_eq!(index.byte_columns(position(1, 2)), position(1, 2));
+    }
+
+    #[test]
+    fn test_columns_of_a_line_the_text_does_not_have_are_left_alone() {
+        let index = LineIndex::new("a\nb");
+
+        assert_eq!(index.utf16_columns(position(9, 3)), position(9, 3));
+        assert_eq!(index.byte_columns(position(9, 3)), position(9, 3));
+    }
+
+    #[test]
+    fn test_a_column_beyond_the_end_of_its_line_clamps_in_both_encodings() {
+        let index = LineIndex::new("äö\nx");
+
+        assert_eq!(index.utf16_columns(position(0, 99)), position(0, 2));
+        assert_eq!(index.byte_columns(position(0, 99)), position(0, 4));
+    }
+
+    proptest! {
+        /// Every byte column of an arbitrary text survives the translation into
+        /// utf-16 code units and back.
+        #[test]
+        fn test_byte_columns_round_trip_through_utf16_ones(text in arbitrary_text()) {
+            let index = LineIndex::new(&text);
+            for offset in (0..=text.len()).filter(|offset| text.is_char_boundary(*offset)) {
+                let bytes = index.byte_columns(index.utf16_position(offset));
+                prop_assert_eq!(index.byte_columns(index.utf16_columns(bytes)), bytes);
+            }
+        }
     }
 
     fn arbitrary_text() -> impl Strategy<Value = String> {

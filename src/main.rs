@@ -10,6 +10,7 @@ use lsp_types::{
 use structured_logger::Builder;
 
 mod command;
+mod encoding;
 
 #[derive(Parser, Debug)]
 #[clap(name = "lspml")]
@@ -108,7 +109,13 @@ fn dump(artifact: &Artifact) -> Result<(), Box<dyn Error + Sync + Send>> {
 fn initialize(connection: &Connection) -> Result<InitializeParams> {
     let (id, params) = connection.initialize_start()?;
     let params: InitializeParams = serde_json::from_value(params)?;
-    let capabilities = serde_json::to_value(capabilities::create(&params.capabilities))?;
+    let capabilities = capabilities::create(&params.capabilities);
+    // What the answer declares is what every column on the wire is counted in
+    // from here on, in both directions.
+    if let Some(position_encoding) = capabilities.position_encoding.clone() {
+        encoding::settle(position_encoding);
+    }
+    let capabilities = serde_json::to_value(capabilities)?;
     connection.initialize_finish(id, serde_json::json!({ "capabilities": capabilities }))?;
     return Ok(params);
 }

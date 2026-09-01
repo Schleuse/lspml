@@ -263,10 +263,9 @@ impl CompletionCollector<'_> {
     }
 
     /// The line before the cursor. Like the rest of the server, this reads the
-    /// cursor character as a byte offset, which a client that counts utf-16
-    /// code units does not send - converting it is #9. Until then the offset is
-    /// clamped to a character boundary, so that a cursor behind a multi byte
-    /// character truncates the line instead of panicking.
+    /// cursor character as a byte offset, which is what the lsp boundary hands
+    /// it. Clamping that offset to a character boundary is what keeps it from
+    /// slicing a multi byte character in half, which slicing a `str` panics on.
     fn line_up_to_cursor(&self) -> &str {
         let line = match self.document.text.lines().nth(self.cursor.line as usize) {
             Some(line) => line,
@@ -650,10 +649,15 @@ mod tests {
 
     #[test]
     fn test_completion_within_a_multi_byte_character() {
-        // read as a byte offset, the cursor sits inside the two bytes of "ö".
-        // clients count characters, so they do send such an offset.
-        let text = format!("{}<sp:if condition=\"${{_x}}\">\nGrö|ße\n</sp:if>", HEADER);
-        assert!(completions_at(&text, Trigger::Invoked).contains(&"<sp:if".to_string()));
+        // A cursor inside the two bytes of "ö". The lsp boundary hands on only
+        // character boundaries, so this guards the clamp in
+        // `line_up_to_cursor` rather than a cursor the collector still sees.
+        let text = format!("{}<sp:if condition=\"${{_x}}\">\nGr|öße\n</sp:if>", HEADER);
+        let (text, mut cursor) = split_cursor_marker(&text);
+        cursor.character += 1;
+        assert!(
+            completions_at_position(text, cursor, Trigger::Invoked).contains(&"<sp:if".to_string())
+        );
     }
 
     #[test]
@@ -677,8 +681,12 @@ mod tests {
     }
 
     fn completions_at(marked_text: &str, trigger: Trigger) -> Vec<String> {
-        let _ = modules::init_empty_module_mappings();
         let (text, cursor) = split_cursor_marker(marked_text);
+        return completions_at_position(text, cursor, trigger);
+    }
+
+    fn completions_at_position(text: String, cursor: Position, trigger: Trigger) -> Vec<String> {
+        let _ = modules::init_empty_module_mappings();
         let document = document_store::Document::new(text, None).expect("failed to parse document");
         let params = TextDocumentPositionParams {
             text_document: TextDocumentIdentifier {
@@ -696,19 +704,14 @@ mod tests {
     }
 
     /// Splits a document that marks the cursor with a "|" into its text and the
-    /// cursor position, counted in utf-16 code units as a client sends it.
+    /// cursor position, counted in the bytes the lsp boundary hands the server.
     fn split_cursor_marker(marked_text: &str) -> (String, Position) {
         let (before, after) = marked_text.split_once('|').expect("no cursor marker");
         return (
             before.to_string() + after,
             Position {
                 line: before.matches('\n').count() as u32,
-                character: before
-                    .rsplit('\n')
-                    .next()
-                    .unwrap_or(before)
-                    .encode_utf16()
-                    .count() as u32,
+                character: before.rsplit('\n').next().unwrap_or(before).len() as u32,
             },
         );
     }
