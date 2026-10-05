@@ -295,9 +295,9 @@ impl CompletionCollector<'_> {
                             }
                         }
                         let module = module.or_else(|| {
-                            modules::find_module_for_file(std::path::Path::new(
-                                self.file.path().as_str(),
-                            ))
+                            document_store::uri_to_path(&self.file)
+                                .ok()
+                                .and_then(|path| modules::find_module_for_file(&path))
                         });
                         if let Some(module) = &module {
                             if let Err(err) = self.complete_uri(uri, module) {

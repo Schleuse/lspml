@@ -716,7 +716,9 @@ impl DiagnosticCollector {
                         };
                         let module = match module_value {
                             Some(WordFragment::Interpolation(_)) | None => {
-                                modules::find_module_for_file(Path::new(self.file.path().as_str()))
+                                document_store::uri_to_path(&self.file)
+                                    .ok()
+                                    .and_then(|path| modules::find_module_for_file(&path))
                             }
                             Some(WordFragment::String(StringLiteral { content, .. })) => {
                                 modules::find_module_by_name(&content)
@@ -1346,13 +1348,11 @@ pub fn diagnose_all(
         if path.is_dir() {
             diagnose_all(&path, result)?;
         } else {
-            let path = path.canonicalize()?;
-            let file = path.to_string_lossy().to_string();
-            if !file.ends_with(".spml") {
+            if path.extension() != Some("spml".as_ref()) {
                 continue;
             }
-            let uri = Url::from_str(&format!("file://{}", file).as_str())
-                .expect("path should be a parsable uri");
+            let path = path.canonicalize()?;
+            let uri = document_store::path_to_uri(&path)?;
             let mut diagnostics = diagnose_uri(uri)?;
             if !diagnostics.is_empty() {
                 diagnostics.sort_by(|a, b| match a.severity.cmp(&b.severity) {

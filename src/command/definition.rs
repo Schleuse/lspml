@@ -227,14 +227,14 @@ pub(crate) fn definition(
                     }
                 }
                 module = module.or_else(|| {
-                    modules::find_module_for_file(Path::new(
-                        text_params.text_document.uri.path().as_str(),
-                    ))
+                    document_store::uri_to_path(&text_params.text_document.uri)
+                        .ok()
+                        .and_then(|path| modules::find_module_for_file(&path))
                 });
                 let file_path = module.map(|module| module.path + &uri.to_string());
                 return Ok(file_path
                     .filter(|file| Path::new(&file).exists())
-                    .and_then(|file| format!("file://{}", &file).parse().ok())
+                    .and_then(|file| document_store::path_to_uri(Path::new(&file)).ok())
                     .map(|uri| LocationLink {
                         origin_selection_range: Some(Range {
                             start: attribute.value.opening_quote_location.end(),
